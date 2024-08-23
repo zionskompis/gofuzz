@@ -58,20 +58,24 @@ async def process_jsluice_output(jsluice_output, current_url, verbose):
             data = json.loads(line)
             if 'url' in data:
                 url = normalize_url(data['url'], current_url)
-                parsed_url = urllib.parse.urlparse(url)
-                if parsed_url.scheme and parsed_url.netloc:
-                    new_url = urllib.parse.urlunparse((
-                        parsed_url.scheme,
-                        parsed_url.netloc,
-                        parsed_url.path,
-                        parsed_url.params,
-                        parsed_url.query,
-                        parsed_url.fragment
-                    ))
-                    if is_js_file(new_url):
-                        js_urls.add(new_url)
-                    else:
-                        non_js_urls.add(new_url)
+                try:
+                    parsed_url = urllib.parse.urlparse(url)
+                    if parsed_url.scheme and parsed_url.netloc:
+                        new_url = urllib.parse.urlunparse((
+                            parsed_url.scheme,
+                            parsed_url.netloc,
+                            parsed_url.path,
+                            parsed_url.params,
+                            parsed_url.query,
+                            parsed_url.fragment
+                        ))
+                        if is_js_file(new_url):
+                            js_urls.add(new_url)
+                        else:
+                            non_js_urls.add(new_url)
+                except ValueError as e:
+                    if verbose:
+                        print(f"Error parsing URL {url}: {str(e)}", file=sys.stderr)
             elif 'kind' in data:
                 data['original_file'] = current_url
                 secrets.append(data)
@@ -86,7 +90,7 @@ async def process_jsluice_output(jsluice_output, current_url, verbose):
         print(f"  Found {len(secrets)} secrets")
 
     return js_urls, non_js_urls, secrets
-
+    
 async def recursive_process(initial_url, session, processed_urls, verbose):
     if initial_url in processed_urls:
         return set(), set(), []
@@ -127,13 +131,16 @@ async def main():
     all_secrets = []
     processed_urls = set()
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
         tasks = []
-        for initial_url in sys.stdin:
-            initial_url = initial_url.strip()
-            if initial_url:
-                tasks.append(recursive_process(initial_url, session, processed_urls, args.verbose))
-
+        try:
+            for initial_url in sys.stdin:
+                initial_url = initial_url.strip()
+                if initial_url:
+                    tasks.append(recursive_process(initial_url, session, processed_urls, args.verbose))
+        except:
+            print("[i] error parsing stdin")
+            
         results = await asyncio.gather(*tasks)
 
         for js_urls, non_js_urls, secrets in results:
